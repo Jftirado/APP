@@ -19,14 +19,13 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -92,7 +91,6 @@ fun MainScreen() {
                         checkAndRequestStoragePermissions(context) {
                             storagePermissionLauncher.launch(Manifest.permission.READ_EXTERNAL_STORAGE)
                         }
-                        // Iniciar el servicio de monitoreo
                         val serviceIntent = Intent(context, MonitoringService::class.java)
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                             context.startForegroundService(serviceIntent)
@@ -167,7 +165,6 @@ fun RemoteFileExplorerScreen(onBack: () -> Unit) {
     var isLoading by remember { mutableStateOf(true) }
     var downloadingFile by remember { mutableStateOf<String?>(null) }
 
-    // Enviar comando al cambiar de carpeta
     LaunchedEffect(currentPath) {
         isLoading = true
         database.child("commands").child(childId).setValue(mapOf(
@@ -176,7 +173,6 @@ fun RemoteFileExplorerScreen(onBack: () -> Unit) {
         ))
     }
 
-    // Escuchar respuesta de archivos y archivos listos para descargar
     DisposableEffect(Unit) {
         val filesListener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
@@ -200,7 +196,6 @@ fun RemoteFileExplorerScreen(onBack: () -> Unit) {
                 if (url != null && name == downloadingFile) {
                     Toast.makeText(context, "Archivo listo: $name", Toast.LENGTH_LONG).show()
                     downloadingFile = null
-                    // Abrir el link en el navegador para descargar
                     val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
                     context.startActivity(intent)
                 }
@@ -227,7 +222,7 @@ fun RemoteFileExplorerScreen(onBack: () -> Unit) {
                     } else {
                         onBack()
                     }
-                }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Volver") }
+                }) { Icon(Icons.Default.ArrowBack, contentDescription = "Volver") }
             }
         )
         
@@ -242,7 +237,6 @@ fun RemoteFileExplorerScreen(onBack: () -> Unit) {
                         if (file.isDirectory) {
                             currentPath = file.path
                         } else {
-                            // Solicitar subida del archivo al hijo
                             downloadingFile = file.name
                             Toast.makeText(context, "Solicitando archivo...", Toast.LENGTH_SHORT).show()
                             database.child("commands").child(childId).setValue(mapOf(

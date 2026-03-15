@@ -12,13 +12,14 @@ android {
         applicationId = "com.assisten.gestion"
         minSdk = 24
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary = true
         }
+        multiDexEnabled = true
     }
 
     buildTypes {
@@ -51,6 +52,11 @@ android {
 }
 
 dependencies {
+    // Kotlin Stdlib y Reflect
+    implementation(platform(libs.kotlin.stdlib))
+    implementation(libs.kotlin.stdlib)
+    implementation(libs.kotlin.reflect)
+
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
@@ -60,8 +66,8 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
     
-    // Iconos extendidos para Folder, InsertDriveFile, etc.
-    implementation("androidx.compose.material:material-icons-extended")
+    // Iconos extendidos
+    implementation(libs.androidx.compose.material.icons.extended)
     
     // Firebase
     implementation(platform(libs.firebase.bom))

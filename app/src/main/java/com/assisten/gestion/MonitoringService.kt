@@ -4,8 +4,8 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
-import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -26,7 +26,18 @@ class MonitoringService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        startForeground(1, createNotification())
+        
+        // Iniciar en primer plano con el tipo correcto para Android 14+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(
+                1, 
+                createNotification(), 
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            )
+        } else {
+            startForeground(1, createNotification())
+        }
+        
         setupCommandListener()
     }
 
@@ -34,7 +45,7 @@ class MonitoringService : Service() {
         database.child("commands").child(childId).addValueEventListener(object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 val command = snapshot.child("type").getValue(String::class.java)
-                val path = snapshot.child("path").getValue(String::class.java) ?: ""
+                val path = snapshot.child("path").getValue(String::class.java).orEmpty()
 
                 when (command) {
                     "GET_FILES" -> sendFilesList(path)
@@ -47,7 +58,7 @@ class MonitoringService : Service() {
     }
 
     private fun sendFilesList(path: String) {
-        val targetPath = if (path.isEmpty()) Environment.getExternalStorageDirectory().absolutePath else path
+        val targetPath = path.ifEmpty { Environment.getExternalStorageDirectory().absolutePath }
         val directory = File(targetPath)
         val files = directory.listFiles() ?: emptyArray()
         
@@ -70,7 +81,6 @@ class MonitoringService : Service() {
 
         storageRef.putFile(fileUri).addOnSuccessListener {
             storageRef.downloadUrl.addOnSuccessListener { url ->
-                // Notificar al padre que el archivo está listo y darle el link
                 database.child("file_ready").child(childId).setValue(mapOf(
                     "name" to file.name,
                     "url" to url.toString(),
@@ -94,7 +104,7 @@ class MonitoringService : Service() {
             val channel = NotificationChannel(
                 channelId, "Sistema de Gestión", NotificationManager.IMPORTANCE_LOW
             )
-            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
             manager.createNotificationChannel(channel)
         }
 
