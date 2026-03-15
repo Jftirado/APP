@@ -75,6 +75,12 @@ dependencies {
     implementation(libs.firebase.storage)
     implementation(libs.firebase.messaging)
 
+    // Coil para imágenes
+    implementation(libs.coil.compose)
+
+    // Google Play Services Location (para nombre de WiFi)
+    implementation(libs.play.services.location)
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

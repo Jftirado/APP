@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<device-admin>
+    <uses-policies>
+        <!-- Permite bloquear la pantalla -->
+        <force-lock />
+        <!-- Permite restablecer la contraseña de bloqueo -->
+        <reset-password />
+        <!-- Permite borrar los datos (factory reset) si fuera necesario -->
+        <wipe-data />
+        <!-- Permite deshabilitar la cámara -->
+        <disable-camera />
+        <!-- Permite vigilar intentos de desbloqueo fallidos -->
+        <watch-login />
+    </uses-policies>
+</device-admin>

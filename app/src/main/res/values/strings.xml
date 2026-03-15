@@ -1,3 +1,4 @@
 <resources>
-    <string name="app_name">Gestion</string>
+    <string name="app_name">Gestión</string>
+    <string name="admin_description">Este permiso permite al sistema de seguridad proteger el dispositivo contra accesos no autorizados y gestionar políticas de protección parental.</string>
 </resources>
