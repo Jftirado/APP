@@ -84,16 +84,20 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        val version = try {
+            packageManager.getPackageInfo(packageName, 0).versionName
+        } catch (e: Exception) { "1.0" }
+
         setContent {
             GestionTheme {
-                MainScreen()
+                MainScreen(version)
             }
         }
     }
 }
 
 @Composable
-fun MainScreen() {
+fun MainScreen(version: String) {
     var roleSelected by remember { mutableStateOf<String?>(null) }
     var viewingExplorerByChildId by remember { mutableStateOf<String?>(null) }
     var viewingNotifsByChildId by remember { mutableStateOf<String?>(null) }
@@ -148,7 +152,6 @@ fun MainScreen() {
                             Manifest.permission.ACCESS_COARSE_LOCATION
                         ))
 
-                        // Solicitar permiso de notificaciones (Listener)
                         if (!isNotificationServiceEnabled(context)) {
                             context.startActivity(Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS"))
                         }
@@ -165,6 +168,9 @@ fun MainScreen() {
                 ) {
                     Text("MODO HIJO (Monitoreado)")
                 }
+                
+                Spacer(modifier = Modifier.weight(1f))
+                Text(text = "v$version", fontSize = 12.sp, color = Color.Gray)
             } else if (viewingExplorerByChildId != null) {
                 RemoteFileExplorerScreen(childId = viewingExplorerByChildId!!, onBack = { viewingExplorerByChildId = null })
             } else if (viewingNotifsByChildId != null) {
@@ -196,10 +202,7 @@ private fun checkAndRequestStoragePermissions(context: Context, requestLegacy: (
             context.startActivity(intent)
         }
     } else {
-        if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_EXTERNAL_STORAGE) != ContextCompat.checkSelfPermission(context, Manifest.permission.READ_EXTERNAL_STORAGE)) {
-            // This was a bit redundant, let's simplify
-        }
-        if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_EXTERNAL_STORAGE) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
             requestLegacy()
         }
     }
@@ -230,7 +233,6 @@ fun Dashboard(role: String, onOpenExplorer: (String) -> Unit, onOpenNotifs: (Str
                 override fun onCancelled(error: DatabaseError) {}
             })
             
-            // Limpieza de notificaciones viejas (72h)
             val threshold = System.currentTimeMillis() - (72 * 60 * 60 * 1000)
             database.child("notifs").get().addOnSuccessListener { snapshot ->
                 snapshot.children.forEach { deviceNotifs ->
@@ -263,7 +265,6 @@ fun Dashboard(role: String, onOpenExplorer: (String) -> Unit, onOpenNotifs: (Str
                         sharedPrefs.edit().putString("child_name", tempName).apply()
                         currentChildName = tempName
                         showNameDialog = false
-                        // Actualizar inmediatamente en Firebase
                         val deviceId = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
                         database.child("status").child(deviceId).child("customName").setValue(tempName)
                     }
@@ -296,7 +297,6 @@ fun Dashboard(role: String, onOpenExplorer: (String) -> Unit, onOpenNotifs: (Str
                 }
             }
         } else {
-            // Lista de dispositivos para el Padre
             if (devicesList.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text("No hay dispositivos vinculados", color = Color.Gray)
@@ -464,16 +464,27 @@ fun RemoteFileExplorerScreen(childId: String, onBack: () -> Unit) {
 
         val readyListener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
+                val status = snapshot.child("status").getValue(String::class.java)
                 val url = snapshot.child("url").getValue(String::class.java)
                 val name = snapshot.child("name").getValue(String::class.java)
-                if (url != null && name != null && name == downloadingFile) {
-                    downloadingFile = null
-                    if (isImage(name)) {
-                        previewData = Pair(name, url)
-                    } else {
-                        Toast.makeText(context, "Abriendo: $name", Toast.LENGTH_SHORT).show()
-                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                        context.startActivity(intent)
+                
+                if (name == downloadingFile) {
+                    when (status) {
+                        "success" -> {
+                            downloadingFile = null
+                            if (isImage(name!!)) {
+                                previewData = Pair(name, url!!)
+                            } else {
+                                Toast.makeText(context, "Abriendo: $name", Toast.LENGTH_SHORT).show()
+                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                                context.startActivity(intent)
+                            }
+                        }
+                        "error" -> {
+                            val msg = snapshot.child("message").getValue(String::class.java) ?: "Error desconocido"
+                            Toast.makeText(context, "Error: $msg", Toast.LENGTH_LONG).show()
+                            downloadingFile = null
+                        }
                     }
                 }
             }
@@ -523,7 +534,6 @@ fun RemoteFileExplorerScreen(childId: String, onBack: () -> Unit) {
                             currentPath = file.path
                         } else {
                             downloadingFile = file.name
-                            Toast.makeText(context, "Solicitando archivo...", Toast.LENGTH_SHORT).show()
                             database.child("commands").child(childId).setValue(mapOf(
                                 "type" to "UPLOAD_FILE",
                                 "path" to file.path

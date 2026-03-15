@@ -1,8 +1,21 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.google.services)
 }
+
+// Cargar versiones desde version.properties
+val versionPropsFile = rootProject.file("version.properties")
+val versionProps = Properties().apply {
+    if (versionPropsFile.exists()) {
+        load(versionPropsFile.inputStream())
+    }
+}
+
+val verCode = versionProps.getProperty("VERSION_CODE")?.toInt() ?: 1
+val verName = versionProps.getProperty("VERSION_NAME") ?: "1.0"
 
 android {
     namespace = "com.assisten.gestion"
@@ -12,8 +25,8 @@ android {
         applicationId = "com.assisten.gestion"
         minSdk = 24
         targetSdk = 34
-        versionCode = 2
-        versionName = "2.0"
+        versionCode = verCode
+        versionName = verName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -22,15 +35,29 @@ android {
         multiDexEnabled = true
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("release")
+        }
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
         }
     }
+    
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_1_8
         targetCompatibility = JavaVersion.VERSION_1_8
@@ -52,7 +79,6 @@ android {
 }
 
 dependencies {
-    // Kotlin Stdlib y Reflect
     implementation(platform(libs.kotlin.stdlib))
     implementation(libs.kotlin.stdlib)
     implementation(libs.kotlin.reflect)
@@ -65,20 +91,14 @@ dependencies {
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
-    
-    // Iconos extendidos
     implementation(libs.androidx.compose.material.icons.extended)
     
-    // Firebase
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.database)
     implementation(libs.firebase.storage)
     implementation(libs.firebase.messaging)
 
-    // Coil para imágenes
     implementation(libs.coil.compose)
-
-    // Google Play Services Location (para nombre de WiFi)
     implementation(libs.play.services.location)
 
     testImplementation(libs.junit)
