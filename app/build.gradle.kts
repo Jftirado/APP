@@ -1,4 +1,5 @@
 import java.util.Properties
+import java.io.File
 
 plugins {
     alias(libs.plugins.android.application)
@@ -6,16 +7,16 @@ plugins {
     alias(libs.plugins.google.services)
 }
 
-// Cargar versiones desde version.properties
-val versionPropsFile = rootProject.file("version.properties")
+// Cargar versiones desde version.properties especificando el tipo de forma explícita
+val versionPropsFile: File = rootProject.file("version.properties")
 val versionProps = Properties().apply {
     if (versionPropsFile.exists()) {
         load(versionPropsFile.inputStream())
     }
 }
 
-val verCode = versionProps.getProperty("VERSION_CODE")?.toInt() ?: 1
-val verName = versionProps.getProperty("VERSION_NAME") ?: "1.0"
+val verCode: Int = versionProps.getProperty("VERSION_CODE")?.toInt() ?: 1
+val verName: String = versionProps.getProperty("VERSION_NAME") ?: "1.0"
 
 android {
     namespace = "com.assisten.gestion"

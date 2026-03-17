@@ -1,10 +1,12 @@
 package com.assisten.gestion
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
@@ -85,8 +87,14 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val version = try {
-            packageManager.getPackageInfo(packageName, 0).versionName
-        } catch (e: Exception) { "1.0" }
+            val pInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                packageManager.getPackageInfo(packageName, PackageManager.PackageInfoFlags.of(0))
+            } else {
+                @Suppress("DEPRECATION")
+                packageManager.getPackageInfo(packageName, 0)
+            }
+            pInfo.versionName ?: "1.0"
+        } catch (_: Exception) { "1.0" }
 
         setContent {
             GestionTheme {
@@ -96,6 +104,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@Suppress("UNUSED_VALUE", "ASSIGNED_VALUE_NEVER_USED")
 @Composable
 fun MainScreen(version: String) {
     var roleSelected by remember { mutableStateOf<String?>(null) }
@@ -188,9 +197,8 @@ fun MainScreen(version: String) {
 }
 
 fun isNotificationServiceEnabled(context: Context): Boolean {
-    val pkgName = context.packageName
     val flat = Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners")
-    return flat != null && flat.contains(pkgName)
+    return flat?.contains(context.packageName) == true
 }
 
 private fun checkAndRequestStoragePermissions(context: Context, requestLegacy: () -> Unit) {
@@ -208,6 +216,7 @@ private fun checkAndRequestStoragePermissions(context: Context, requestLegacy: (
     }
 }
 
+@Suppress("UNUSED_VALUE", "ASSIGNED_VALUE_NEVER_USED")
 @Composable
 fun Dashboard(role: String, onOpenExplorer: (String) -> Unit, onOpenNotifs: (String) -> Unit, onBack: () -> Unit) {
     val context = LocalContext.current
@@ -265,6 +274,7 @@ fun Dashboard(role: String, onOpenExplorer: (String) -> Unit, onOpenNotifs: (Str
                         sharedPrefs.edit().putString("child_name", tempName).apply()
                         currentChildName = tempName
                         showNameDialog = false
+                        @SuppressLint("HardwareIds")
                         val deviceId = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
                         database.child("status").child(deviceId).child("customName").setValue(tempName)
                     }
@@ -279,7 +289,7 @@ fun Dashboard(role: String, onOpenExplorer: (String) -> Unit, onOpenNotifs: (Str
         if (role == "Hijo") {
             Card(modifier = Modifier.fillMaxWidth().padding(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
                 Column(Modifier.padding(16.dp)) {
-                    Text("Dispositivo: $currentChildName", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    Text("Dispositivo: ${currentChildName.ifBlank { "Sin nombre" }}", fontWeight = FontWeight.Bold, fontSize = 18.sp)
                     Text("Estado: Monitoreo Activo")
                     Spacer(modifier = Modifier.height(16.dp))
                     Button(
@@ -426,6 +436,7 @@ private fun requestDeviceAdmin(context: Context) {
     }
 }
 
+@Suppress("UNUSED_VALUE", "ASSIGNED_VALUE_NEVER_USED")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RemoteFileExplorerScreen(childId: String, onBack: () -> Unit) {
@@ -435,7 +446,7 @@ fun RemoteFileExplorerScreen(childId: String, onBack: () -> Unit) {
     var filesList by remember { mutableStateOf<List<FileItem>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
     var downloadingFile by remember { mutableStateOf<String?>(null) }
-    var previewData by remember { mutableStateOf<Pair<String, String>?>(null) } // Pair(Name, URL)
+    var previewData by remember { mutableStateOf<Pair<String, String>?>(null) }
 
     LaunchedEffect(currentPath) {
         isLoading = true
