@@ -3,9 +3,10 @@ package com.assisten.gestion
 import android.annotation.SuppressLint
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
-import android.provider.Settings
 import android.util.Log
-import com.google.firebase.database.FirebaseDatabase
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
 
 class NotificationService : NotificationListenerService() {
 
@@ -13,12 +14,11 @@ class NotificationService : NotificationListenerService() {
 
     override fun onListenerConnected() {
         super.onListenerConnected()
-        Log.d("NotificationService", "✅ Servicio conectado")
+        Log.d("NotificationService", "✅ Servicio de logs local iniciado")
     }
 
-    @SuppressLint("HardwareIds")
     override fun onNotificationPosted(sbn: StatusBarNotification) {
-        if (sbn.isOngoing) return // Ignorar notificaciones persistentes (música, llamadas, etc.)
+        if (sbn.isOngoing) return
 
         val packageName = sbn.packageName
         val extras = sbn.notification.extras
@@ -28,15 +28,27 @@ class NotificationService : NotificationListenerService() {
         if (text.isBlank() || text == lastNotificationText) return
         lastNotificationText = text
 
-        val deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
-        val log = mapOf(
-            "app" to packageName,
-            "title" to title,
-            "text" to text,
-            "timestamp" to System.currentTimeMillis()
-        )
+        saveNotificationLocally(packageName, title, text)
+    }
 
-        FirebaseDatabase.getInstance().reference
-            .child("notifs").child(deviceId).push().setValue(log)
+    private fun saveNotificationLocally(app: String, title: String, text: String) {
+        try {
+            val logFile = File(filesDir, "notifs_cache.json")
+            val currentLogs = if (logFile.exists()) logFile.readText() else "[]"
+            val jsonArray = JSONArray(currentLogs)
+            
+            val newLog = JSONObject().apply {
+                put("app", app)
+                put("title", title)
+                put("text", text)
+                put("timestamp", System.currentTimeMillis())
+            }
+            
+            jsonArray.put(newLog)
+            logFile.writeText(jsonArray.toString())
+            Log.d("NotificationService", "💾 Mensaje guardado en caché local")
+        } catch (e: Exception) {
+            Log.e("NotificationService", "Error al guardar local: ${e.message}")
+        }
     }
 }

