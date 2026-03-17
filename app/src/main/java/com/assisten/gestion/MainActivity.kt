@@ -223,6 +223,7 @@ fun Dashboard(role: String, onOpenExplorer: (String) -> Unit, onOpenNotifs: (Str
     val database = FirebaseDatabase.getInstance().reference
     var devicesList by remember { mutableStateOf<List<DeviceStatus>>(emptyList()) }
     var showNameDialog by remember { mutableStateOf(false) }
+    var editingDevice by remember { mutableStateOf<DeviceStatus?>(null) }
     val sharedPrefs = remember { context.getSharedPreferences("GestionPrefs", Context.MODE_PRIVATE) }
     var currentChildName by remember { mutableStateOf(sharedPrefs.getString("child_name", "") ?: "") }
 
@@ -256,27 +257,29 @@ fun Dashboard(role: String, onOpenExplorer: (String) -> Unit, onOpenNotifs: (Str
         }
     }
 
-    if (showNameDialog) {
-        var tempName by remember { mutableStateOf("") }
+    if (showNameDialog || editingDevice != null) {
+        var tempName by remember { mutableStateOf(editingDevice?.customName ?: "") }
         AlertDialog(
-            onDismissRequest = { },
-            title = { Text("Identificar Dispositivo") },
+            onDismissRequest = { showNameDialog = false; editingDevice = null },
+            title = { Text(if (editingDevice != null) "Editar Nombre" else "Identificar Dispositivo") },
             text = {
                 Column {
-                    Text("Ingresa un nombre para este celular (ej: Juan, Tablet, etc.)")
+                    Text("Ingresa un nombre para identificar este equipo:")
                     Spacer(Modifier.height(8.dp))
-                    TextField(value = tempName, onValueChange = { tempName = it }, placeholder = { Text("Nombre del hijo") })
+                    TextField(value = tempName, onValueChange = { tempName = it }, placeholder = { Text("Ej: Juan") })
                 }
             },
             confirmButton = {
                 Button(onClick = {
                     if (tempName.isNotBlank()) {
-                        sharedPrefs.edit().putString("child_name", tempName).apply()
-                        currentChildName = tempName
+                        val targetId = editingDevice?.deviceId ?: Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
+                        database.child("status").child(targetId).child("customName").setValue(tempName)
+                        if (editingDevice == null) {
+                            sharedPrefs.edit().putString("child_name", tempName).apply()
+                            currentChildName = tempName
+                        }
                         showNameDialog = false
-                        @SuppressLint("HardwareIds")
-                        val deviceId = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
-                        database.child("status").child(deviceId).child("customName").setValue(tempName)
+                        editingDevice = null
                     }
                 }) { Text("Guardar") }
             }
@@ -314,7 +317,13 @@ fun Dashboard(role: String, onOpenExplorer: (String) -> Unit, onOpenNotifs: (Str
             } else {
                 LazyColumn(modifier = Modifier.fillMaxSize()) {
                     items(devicesList) { device ->
-                        DeviceCard(device, onOpenExplorer = { onOpenExplorer(device.deviceId) }, onOpenNotifs = { onOpenNotifs(device.deviceId) })
+                        DeviceCard(
+                            device = device, 
+                            onOpenExplorer = { onOpenExplorer(device.deviceId) }, 
+                            onOpenNotifs = { onOpenNotifs(device.deviceId) },
+                            onEdit = { editingDevice = device },
+                            onDelete = { database.child("status").child(device.deviceId).removeValue() }
+                        )
                     }
                 }
             }
@@ -325,15 +334,18 @@ fun Dashboard(role: String, onOpenExplorer: (String) -> Unit, onOpenNotifs: (Str
 }
 
 @Composable
-fun DeviceCard(device: DeviceStatus, onOpenExplorer: () -> Unit, onOpenNotifs: () -> Unit) {
+fun DeviceCard(device: DeviceStatus, onOpenExplorer: () -> Unit, onOpenNotifs: () -> Unit, onEdit: () -> Unit, onDelete: () -> Unit) {
     Card(modifier = Modifier.fillMaxWidth().padding(8.dp)) {
         Column(Modifier.padding(16.dp)) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Column {
-                    Text(text = device.customName.ifBlank { "Sin nombre" }, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                Column(Modifier.clickable { onEdit() }.weight(1f)) {
+                    Text(text = device.customName.ifBlank { "Sin nombre (Tocar p/ editar)" }, fontWeight = FontWeight.Bold, fontSize = 18.sp)
                     Text(text = device.model, fontSize = 12.sp, color = Color.Gray)
                 }
-                LiveStatusCard(device)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    LiveStatusCard(device)
+                    IconButton(onClick = onDelete) { Icon(Icons.Default.Delete, null, tint = Color.Red, modifier = Modifier.size(20.dp)) }
+                }
             }
             Spacer(Modifier.height(8.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
@@ -446,6 +458,7 @@ fun RemoteFileExplorerScreen(childId: String, onBack: () -> Unit) {
     var filesList by remember { mutableStateOf<List<FileItem>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
     var downloadingFile by remember { mutableStateOf<String?>(null) }
+    var downloadProgress by remember { mutableStateOf(0) }
     var previewData by remember { mutableStateOf<Pair<String, String>?>(null) }
 
     LaunchedEffect(currentPath) {
@@ -478,11 +491,14 @@ fun RemoteFileExplorerScreen(childId: String, onBack: () -> Unit) {
                 val status = snapshot.child("status").getValue(String::class.java)
                 val url = snapshot.child("url").getValue(String::class.java)
                 val name = snapshot.child("name").getValue(String::class.java)
+                val progress = snapshot.child("progress").getValue(Int::class.java) ?: 0
                 
                 if (name == downloadingFile) {
+                    downloadProgress = progress
                     when (status) {
                         "success" -> {
                             downloadingFile = null
+                            downloadProgress = 0
                             if (isImage(name!!)) {
                                 previewData = Pair(name, url!!)
                             } else {
@@ -495,6 +511,7 @@ fun RemoteFileExplorerScreen(childId: String, onBack: () -> Unit) {
                             val msg = snapshot.child("message").getValue(String::class.java) ?: "Error desconocido"
                             Toast.makeText(context, "Error: $msg", Toast.LENGTH_LONG).show()
                             downloadingFile = null
+                            downloadProgress = 0
                         }
                     }
                 }
@@ -540,7 +557,7 @@ fun RemoteFileExplorerScreen(childId: String, onBack: () -> Unit) {
         } else {
             LazyColumn(modifier = Modifier.fillMaxSize()) {
                 items(filesList) { file ->
-                    FileListItem(file, file.name == downloadingFile) {
+                    FileListItem(file, file.name == downloadingFile, downloadProgress) {
                         if (file.isDirectory) {
                             currentPath = file.path
                         } else {
@@ -558,14 +575,19 @@ fun RemoteFileExplorerScreen(childId: String, onBack: () -> Unit) {
 }
 
 @Composable
-fun FileListItem(file: FileItem, isDownloading: Boolean, onClick: () -> Unit) {
+fun FileListItem(file: FileItem, isDownloading: Boolean, progress: Int, onClick: () -> Unit) {
     Row(
         modifier = Modifier.fillMaxWidth().clickable { onClick() }.padding(12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) {
             if (isDownloading) {
-                CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                CircularProgressIndicator(
+                    progress = progress / 100f,
+                    modifier = Modifier.size(40.dp),
+                    strokeWidth = 3.dp
+                )
+                Text("${progress}%", fontSize = 10.sp, fontWeight = FontWeight.Bold)
             } else if (file.thumbnail != null) {
                 val bitmap = remember(file.thumbnail) {
                     val decodedString = Base64.decode(file.thumbnail, Base64.DEFAULT)

