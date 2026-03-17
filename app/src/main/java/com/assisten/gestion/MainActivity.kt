@@ -53,6 +53,7 @@ import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.database.ValueEventListener
 import java.io.File
+import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -367,6 +368,7 @@ fun DeviceCard(device: DeviceStatus, onOpenExplorer: () -> Unit, onOpenNotifs: (
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NotificationsLogScreen(childId: String, onBack: () -> Unit) {
+    val context = LocalContext.current
     val database = FirebaseDatabase.getInstance().reference
     var notifsList by remember { mutableStateOf<List<NotificationLog>>(emptyList()) }
 
@@ -386,7 +388,17 @@ fun NotificationsLogScreen(childId: String, onBack: () -> Unit) {
     }
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("Log de Mensajes") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null) } }) }
+        topBar = { 
+            TopAppBar(
+                title = { Text("Log de Mensajes") }, 
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null) } },
+                actions = {
+                    IconButton(onClick = { exportNotifications(context, notifsList) }) {
+                        Icon(Icons.Default.Share, contentDescription = "Exportar")
+                    }
+                }
+            ) 
+        }
     ) { padding ->
         if (notifsList.isEmpty()) {
             Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
@@ -419,6 +431,33 @@ fun NotificationsLogScreen(childId: String, onBack: () -> Unit) {
                 }
             }
         }
+    }
+}
+
+private fun exportNotifications(context: Context, list: List<NotificationLog>) {
+    if (list.isEmpty()) {
+        Toast.makeText(context, "No hay mensajes para exportar", Toast.LENGTH_SHORT).show()
+        return
+    }
+    try {
+        val fileName = "Notificaciones_${System.currentTimeMillis()}.txt"
+        val file = File(context.cacheDir, fileName)
+        FileOutputStream(file).use { out ->
+            list.forEach { n ->
+                val time = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(n.timestamp))
+                val line = "[$time] ${n.app.split(".").last().uppercase()}\nDe: ${n.title}\nMsj: ${n.text}\n------------------\n"
+                out.write(line.toByteArray())
+            }
+        }
+        val uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", file)
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(Intent.createChooser(intent, "Compartir Log de Mensajes"))
+    } catch (_: Exception) {
+        Toast.makeText(context, "Fallo al generar el archivo", Toast.LENGTH_SHORT).show()
     }
 }
 
@@ -465,7 +504,8 @@ fun RemoteFileExplorerScreen(childId: String, onBack: () -> Unit) {
         isLoading = true
         database.child("commands").child(childId).setValue(mapOf(
             "type" to "GET_FILES",
-            "path" to currentPath
+            "path" to currentPath,
+            "timestamp" to System.currentTimeMillis()
         ))
     }
 
@@ -564,7 +604,8 @@ fun RemoteFileExplorerScreen(childId: String, onBack: () -> Unit) {
                             downloadingFile = file.name
                             database.child("commands").child(childId).setValue(mapOf(
                                 "type" to "UPLOAD_FILE",
-                                "path" to file.path
+                                "path" to file.path,
+                                "timestamp" to System.currentTimeMillis()
                             ))
                         }
                     }

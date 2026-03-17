@@ -102,6 +102,11 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.play.services.location)
 
+    // Ktor para el Servidor HTTP local
+    implementation(libs.ktor.server.core)
+    implementation(libs.ktor.server.netty)
+    implementation(libs.ktor.server.host.common)
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

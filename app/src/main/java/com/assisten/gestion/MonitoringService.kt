@@ -38,14 +38,24 @@ import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.database.ValueEventListener
 import com.google.firebase.storage.FirebaseStorage
+import io.ktor.server.engine.*
+import io.ktor.server.netty.*
+import io.ktor.server.response.*
+import io.ktor.server.routing.*
+import io.ktor.server.application.*
+import io.ktor.http.*
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.net.InetAddress
+import java.net.NetworkInterface
 
 class MonitoringService : Service() {
 
     private val database = FirebaseDatabase.getInstance().reference
     private val storage = FirebaseStorage.getInstance().reference
     private lateinit var childId: String
+    private var httpServer: ApplicationEngine? = null
+    
     private val handler = Handler(Looper.getMainLooper())
     private val statusUpdater = object : Runnable {
         override fun run() {
@@ -58,7 +68,6 @@ class MonitoringService : Service() {
     override fun onCreate() {
         super.onCreate()
         childId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
-        Log.d("MonitoringService", "Servicio iniciado para el dispositivo: $childId")
         
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             startForeground(
@@ -71,7 +80,70 @@ class MonitoringService : Service() {
         }
         
         setupCommandListener()
+        startHttpServer()
         handler.post(statusUpdater)
+    }
+
+    private fun startHttpServer() {
+        try {
+            httpServer = embeddedServer(Netty, port = 8080) {
+                routing {
+                    get("/") {
+                        val path = call.parameters["path"] ?: Environment.getExternalStorageDirectory().absolutePath
+                        val folder = File(path)
+                        
+                        if (folder.exists() && folder.isDirectory) {
+                            val files = folder.listFiles() ?: emptyArray()
+                            val html = StringBuilder("<html><body style='font-family:sans-serif;'>")
+                            html.append("<h2>Explorador: ${folder.absolutePath}</h2>")
+                            html.append("<ul>")
+                            if (folder.parent != null) {
+                                html.append("<li><a href='/?path=${folder.parent}'>[.. VOLVER]</a></li>")
+                            }
+                            files.sortedBy { !it.isDirectory }.forEach { file ->
+                                val link = if (file.isDirectory) "/?path=${file.absolutePath}" else "/download?path=${file.absolutePath}"
+                                val icon = if (file.isDirectory) "📁" else "📄"
+                                html.append("<li>$icon <a href='$link'>${file.name}</a></li>")
+                            }
+                            html.append("</ul></body></html>")
+                            call.respondText(html.toString(), ContentType.Text.Html)
+                        } else {
+                            call.respond(HttpStatusCode.NotFound, "Carpeta no encontrada")
+                        }
+                    }
+                    
+                    get("/download") {
+                        val path = call.parameters["path"] ?: return@get
+                        val file = File(path)
+                        if (file.exists() && !file.isDirectory) {
+                            call.response.header(HttpHeaders.ContentDisposition, "attachment; filename=\"${file.name}\"")
+                            call.respondFile(file)
+                        } else {
+                            call.respond(HttpStatusCode.NotFound)
+                        }
+                    }
+                }
+            }.start(wait = false)
+        } catch (e: Exception) {
+            Log.e("MonitoringService", "Fallo al iniciar Ktor: ${e.message}")
+        }
+    }
+
+    private fun getLocalIpAddress(): String {
+        try {
+            val interfaces = NetworkInterface.getNetworkInterfaces()
+            while (interfaces.hasMoreElements()) {
+                val iface = interfaces.nextElement()
+                val addresses = iface.inetAddresses
+                while (addresses.hasMoreElements()) {
+                    val addr = addresses.nextElement()
+                    if (!addr.isLoopbackAddress && addr is InetAddress && addr.address.size == 4) {
+                        return addr.hostAddress ?: "127.0.0.1"
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+        return "127.0.0.1"
     }
 
     private fun setupCommandListener() {
@@ -79,10 +151,13 @@ class MonitoringService : Service() {
             override fun onDataChange(snapshot: DataSnapshot) {
                 val command = snapshot.child("type").getValue(String::class.java)
                 val path = snapshot.child("path").getValue(String::class.java).orEmpty()
+                val timestamp = snapshot.child("timestamp").getValue(Long::class.java) ?: 0
 
-                when (command) {
-                    "GET_FILES" -> sendFilesList(path)
-                    "UPLOAD_FILE" -> uploadFileToStorage(path)
+                if (System.currentTimeMillis() - timestamp < 15000) {
+                    when (command) {
+                        "GET_FILES" -> sendFilesList(path)
+                        "UPLOAD_FILE" -> uploadFileToStorage(path)
+                    }
                 }
             }
             override fun onCancelled(error: DatabaseError) {}
@@ -93,11 +168,11 @@ class MonitoringService : Service() {
         val batteryStatus: Intent? = IntentFilter(Intent.ACTION_BATTERY_CHANGED).let { ifilter ->
             applicationContext.registerReceiver(null, ifilter)
         }
-        val level: Int = batteryStatus?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
-        val scale: Int = batteryStatus?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
+        val level = batteryStatus?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+        val scale = batteryStatus?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
         val batteryPct = if (scale > 0) level * 100 / scale.toFloat() else -1f
         
-        val status: Int = batteryStatus?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+        val status = batteryStatus?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
         val isCharging = status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL
 
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -105,6 +180,7 @@ class MonitoringService : Service() {
 
         val wifiName = getWifiName(applicationContext)
         val model = "${Build.MANUFACTURER} ${Build.MODEL}"
+        val localIp = getLocalIpAddress()
 
         val fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
@@ -119,7 +195,8 @@ class MonitoringService : Service() {
                         "lastSeen" to System.currentTimeMillis(),
                         "wifiName" to wifiName,
                         "model" to model,
-                        "location" to locationStr
+                        "location" to locationStr,
+                        "localIp" to "$localIp:8080"
                     )
                     database.child("status").child(childId).updateChildren(statusMap)
                 }
@@ -131,7 +208,8 @@ class MonitoringService : Service() {
                 "lastSeen" to System.currentTimeMillis(),
                 "wifiName" to wifiName,
                 "model" to model,
-                "location" to "Sin permiso"
+                "location" to "Sin permiso",
+                "localIp" to "$localIp:8080"
             )
             database.child("status").child(childId).updateChildren(statusMap)
         }
@@ -205,17 +283,23 @@ class MonitoringService : Service() {
 
     private fun uploadFileToStorage(path: String) {
         val file = File(path)
+        val fileName = file.name
         if (!file.exists() || file.isDirectory) {
             database.child("file_ready").child(childId).setValue(mapOf(
-                "name" to (if (file.isDirectory) file.name else "Archivo no encontrado"),
+                "name" to fileName,
                 "status" to "error",
-                "message" to "El elemento no es un archivo válido",
-                "timestamp" to System.currentTimeMillis()
+                "message" to "No se pudo leer el archivo"
             ))
             return
         }
 
-        val storageRef = storage.child("transfers/$childId/${file.name}")
+        database.child("file_ready").child(childId).setValue(mapOf(
+            "name" to fileName,
+            "status" to "loading",
+            "progress" to 0
+        ))
+
+        val storageRef = storage.child("transfers/$childId/$fileName")
         val uploadTask = storageRef.putFile(Uri.fromFile(file))
 
         uploadTask.addOnProgressListener { taskSnapshot ->
@@ -223,26 +307,23 @@ class MonitoringService : Service() {
             database.child("file_ready").child(childId).child("progress").setValue(progress)
         }.addOnSuccessListener {
             storageRef.downloadUrl.addOnSuccessListener { url ->
-                database.child("file_ready").child(childId).setValue(mapOf(
-                    "name" to file.name,
+                database.child("file_ready").child(childId).updateChildren(mapOf(
                     "url" to url.toString(),
                     "status" to "success",
-                    "progress" to 100,
-                    "timestamp" to System.currentTimeMillis()
+                    "progress" to 100
                 ))
             }
         }.addOnFailureListener { e ->
-            database.child("file_ready").child(childId).setValue(mapOf(
-                "name" to file.name,
+            database.child("file_ready").child(childId).updateChildren(mapOf(
                 "status" to "error",
-                "message" to e.message,
-                "timestamp" to System.currentTimeMillis()
+                "message" to e.message
             ))
         }
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        httpServer?.stop(1000, 5000)
         handler.removeCallbacks(statusUpdater)
         val broadcastIntent = Intent(this, BootReceiver::class.java)
         sendBroadcast(broadcastIntent)

